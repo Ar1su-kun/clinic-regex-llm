@@ -1,19 +1,18 @@
 import json
 import re
-import label_studio_sdk
 
-N = 200
-M = 100
+N = 20
+M = 0
 THRESHOLD = 0.5
-LABEL_STUDIO_URL = ''
-LABEL_STUDIO_API_KEY = ''
+
 
 with open('input.json', 'r', encoding='utf-8') as json_file:
-        not_marked_data = json.load(json_file)
+    not_marked_data = json.load(json_file)
 with open('REGEX.json', 'r', encoding='utf-8') as json_file:
-        regex= json.load(json_file)
+    regex= json.load(json_file)
 with open('labelstudio_import.json', 'r', encoding='utf-8') as json_file:
-        marked_data = json.load(json_file)
+    marked_data = json.load(json_file)
+
 
 MARK_TYPES = ["СилаРекомендации", "Цель", "Состояние", "Популяция", "Действие", "Модификатор"]
 
@@ -51,6 +50,46 @@ def input_regex():
             regex_marks.append([txt, id, current_regex_mark])
     return regex_marks
 
+# regex_marks = [txt, id, [start, end, type, mark], ..., [start, end, type, mark]]
+def prepare_to_load_regex(regex_marks):
+    load_tasks = []
+    for index, item in enumerate(regex_marks):
+        txt = item[0]
+        id = item[1]
+        marks = item[2]
+        pred_result = []
+        for mark in marks:
+            start = mark[0]
+            end = mark[1]
+            type = mark[2]
+            mark_text = mark[3]
+            pred_result.append({
+                "from_name": "label",
+                "to_name": "text",
+                "type": "labels",
+                "value": {
+                    "start": start,
+                    "end": end,
+                    "labels": [type],
+                    "text": mark_text
+                }
+            })
+        predictions = [{
+                "result": pred_result,
+                "score": 0.95
+            }]
+        task = {
+            "data": {
+                "text": txt,
+                "id": id  
+            }
+        }
+        task["predictions"] = predictions
+        task["annotations"] = marked_data[index]["annotations"]
+
+        load_tasks.append(task)
+    with open('load.json', 'w', encoding='utf-8') as load_file:
+        json.dump(load_tasks, load_file, ensure_ascii=False, indent=2)
 
 def input_marked_data(str):
     input_marks = []
@@ -68,24 +107,27 @@ def input_marked_data(str):
             input_marks.append([txt, id, current_human_mark])
     return input_marks
 
+
 def compare_marks(mark1, mark2): # оставь надежду всяк сюда входящий
     avr_iou = {}
     iou_count = {}
          
+    #file = open('output.txt', 'w', encoding='utf-8')
     for type in MARK_TYPES:  #сравнениваем человека и регулярки
         current_iou = []
+        
         for i in range(N - M):
-            mark1_filtered = []                         # - список с элементами вида: [start, end], таких, что
+            mark1_filtered = []       # - список с элементами вида: [start, end], таких, что
             for item in mark1[i][2]:  # тип соответсвующей метки == type
                 if type == item[2]:
                     mark1_filtered.append([item[0], item[1]])
             mark2_filtered = []
             for item in mark2[i][2]:
-                if type == item[2]:         # аналогично mark2
+                if type == item[2]:   # аналогично mark2
                     mark2_filtered.append([item[0], item[1]])
             mark1_filtered.sort(key=lambda x: x[0])
             mark2_filtered.sort(key=lambda x: x[0])
-
+            
             for j in range(abs(len(mark1_filtered) - len(mark2_filtered))): # за разницу между колличеством меток накидываем нулевых метрик
                 current_iou.append(0.0)
 
@@ -102,7 +144,7 @@ def compare_marks(mark1, mark2): # оставь надежду всяк сюда
                     mark2_filtered.pop()
                 else:
                     mark2_filtered.pop(0)
-            # cравняли списки
+
             for j in range(len(mark1_filtered)):
                 current_iou.append(iou(mark1_filtered[j], mark2_filtered[j]))
         if len(current_iou) != 0:
@@ -112,9 +154,6 @@ def compare_marks(mark1, mark2): # оставь надежду всяк сюда
             avr_iou[type] = 0
             iou_count[type] = 0
     return avr_iou, iou_count
-
-    
-    
 
 
 def main():
@@ -126,16 +165,14 @@ def main():
 
     human_marks = input_marked_data("annotations")
 
+    prepare_to_load_regex(regex_marks)
+
     avr_iou, iou_count = compare_marks(human_marks, regex_marks)
     
-    
-    print()
     print(f"{"Mark":^17} {"Avr IoU":^20} {"IoU count":^9}")
     for type in MARK_TYPES:
         print(f"{type+':':<17} {avr_iou[type]:<20} {iou_count[type]:^9}")
     print()
-
-
 
 
 if __name__ == "__main__":
